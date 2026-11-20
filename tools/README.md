@@ -8,10 +8,11 @@
   ```sh
   # 从本仓根；RECOVERY_SRC 是已核验的同版源码绝对路径。
   build=$(mktemp -d)
-  cp -a tools/skyward-package-check/{Cargo.toml,Cargo.lock,src} "$build/"
+  mkdir "$build/checker"
+  cp -a tools/skyward-package-check/{Cargo.toml,Cargo.lock,src} "$build/checker/"
   ln -s "$RECOVERY_SRC" "$build/recovery"
-  cargo build --locked --manifest-path "$build/Cargo.toml"
-  export SKYWARD_PACKAGE_CHECK="$build/target/debug/skyward-package-check"
+  cargo build --locked --manifest-path "$build/checker/Cargo.toml"
+  export SKYWARD_PACKAGE_CHECK="$build/checker/target/debug/skyward-package-check"
   ```
 
 `build-static-e2fsprogs.sh` 是 P5.3 原构建脚本。实际打包需受控的功能验证记录和二进制摘要，仓库不含这些 helper 的二进制。`verify-heritage.py` 比较 `.heritage-snapshot` 中的原始归档与当前树，并报告逐文件差异。

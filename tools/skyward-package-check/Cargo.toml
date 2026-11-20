@@ -7,5 +7,5 @@ publish = false
 [workspace]
 
 [dependencies]
-skyward-systems = { path = "recovery/crates/skyward-systems" }
+skyward-systems = { path = "../recovery/crates/skyward-systems" }
 zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
