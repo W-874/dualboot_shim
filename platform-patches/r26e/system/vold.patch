@@ -1,0 +1,150 @@
+diff --git a/MetadataCrypt.cpp b/MetadataCrypt.cpp
+index e435d7da7ad735ee27d1784aa34a55fd90318b73..bc165efc63824f89d9f306cdf9f28fb159cfef0f 100644
+--- a/MetadataCrypt.cpp
++++ b/MetadataCrypt.cpp
+@@ -19,11 +19,13 @@
+ 
+ #include <fstream>
+ #include <string>
++#include <string_view>
+ 
+ #include <fcntl.h>
+ #include <sys/param.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
++#include <unistd.h>
+ 
+ #include <android-base/logging.h>
+ #include <android-base/properties.h>
+@@ -67,6 +69,7 @@ struct CryptoOptions {
+ };
+ 
+ static const std::string kDmNameUserdata = "userdata";
++static constexpr char kSkywardUserdata[] = "/dev/block/skyward/userdata";
+ 
+ // The first entry in this table is the default crypto type.
+ constexpr CryptoType supported_crypto_types[] = {aes_256_xts, adiantum};
+@@ -295,6 +298,73 @@ class EncryptionInProgress {
+     }
+ };
+ 
++static bool ConsumeSkywardMkfsToken() {
++    constexpr char kTokenName[] = "skyward-mkfs-v2";
++    constexpr std::string_view kTokenContents = "v2\n";
++
++    // Use O_PATH on /metadata: vold needs to traverse it, not read it.
++    android::base::unique_fd metadata_fd(
++            open("/metadata", O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
++    if (metadata_fd < 0) {
++        PLOG(ERROR) << "Skyward mkfs: cannot open /metadata";
++        return false;
++    }
++    android::base::unique_fd dir_fd(
++            openat(metadata_fd, "vold", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
++    if (dir_fd < 0) {
++        PLOG(ERROR) << "Skyward mkfs: cannot open /metadata/vold";
++        return false;
++    }
++    struct stat st;
++    if (fstat(dir_fd, &st) != 0) {
++        PLOG(ERROR) << "Skyward mkfs: cannot stat /metadata/vold";
++        return false;
++    }
++    if (st.st_uid != 0 || st.st_gid != 0 || (st.st_mode & 07777) != 0700) {
++        LOG(ERROR) << "Skyward mkfs: /metadata/vold must be root:root with mode 0700";
++        return false;
++    }
++
++    android::base::unique_fd token_fd(
++            openat(dir_fd, kTokenName, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC));
++    if (token_fd < 0) {
++        PLOG(ERROR) << "Skyward mkfs: cannot open format token " << kTokenName;
++        return false;
++    }
++    if (fstat(token_fd, &st) != 0) {
++        PLOG(ERROR) << "Skyward mkfs: cannot stat format token";
++        return false;
++    }
++    if (!S_ISREG(st.st_mode) || st.st_uid != 0 || st.st_gid != 0 || st.st_nlink != 1 ||
++        (st.st_mode & 07777) != 0600 || st.st_size != static_cast<off_t>(kTokenContents.size())) {
++        LOG(ERROR) << "Skyward mkfs: unsafe format token (type, ownership, links, mode, or size)";
++        return false;
++    }
++    char contents[kTokenContents.size() + 1];
++    const auto size = TEMP_FAILURE_RETRY(read(token_fd, contents, sizeof(contents)));
++    if (size < 0) {
++        PLOG(ERROR) << "Skyward mkfs: cannot read format token";
++        return false;
++    }
++    if (std::string_view(contents, size) != kTokenContents) {
++        LOG(ERROR) << "Skyward mkfs: invalid format token contents";
++        return false;
++    }
++
++    // The publisher runs before init; the root-only parent prevents unprivileged replacement.
++    // Keep the directory pinned for both removal and persistence of the one-shot grant.
++    if (unlinkat(dir_fd, kTokenName, 0) != 0) {
++        PLOG(ERROR) << "Skyward mkfs: cannot unlink format token";
++        return false;
++    }
++    if (TEMP_FAILURE_RETRY(fsync(dir_fd)) != 0) {
++        PLOG(ERROR) << "Skyward mkfs: cannot persist format token removal";
++        return false;
++    }
++    LOG(INFO) << "Skyward mkfs: consumed format token for encrypted /data";
++    return true;
++}
++
+ bool fscrypt_mount_metadata_encrypted(const std::string& blk_device, const std::string& mount_point,
+                                       bool needs_encrypt, bool should_format,
+                                       const std::string& fs_type, bool is_zoned,
+@@ -322,6 +392,28 @@ bool fscrypt_mount_metadata_encrypted(const std::string& blk_device, const std::
+         return false;
+     }
+ 
++    // Match the guest alias in either the request or fstab so an alternate spelling
++    // in the request cannot bypass the gate. Plain mounts never consume a token.
++    const bool skyward_format = needs_encrypt &&
++            (blk_device == kSkywardUserdata || data_rec->blk_device == kSkywardUserdata) &&
++            android::base::GetProperty("ro.product.device", "") == "fuxi";
++    if (skyward_format) {
++        if (blk_device != kSkywardUserdata || mount_point != "/data" ||
++            data_rec->blk_device != kSkywardUserdata) {
++            LOG(ERROR) << "Skyward mkfs: request and fstab must use the exact guest /data alias";
++            return false;
++        }
++        if (!should_format) {
++            LOG(ERROR) << "Skyward mkfs: in-place encryption is not authorized for guest /data";
++            return false;
++        }
++        if (fs_type != "ext4" || data_rec->fs_type != "ext4" || is_zoned ||
++            !user_devices.empty() || !device_aliased.empty() || length != 0) {
++            LOG(ERROR) << "Skyward mkfs: expected whole-volume ext4 on a single non-zoned device";
++            return false;
++        }
++    }
++
+     unsigned int options_format_version = android::base::GetUintProperty<unsigned int>(
+             "ro.crypto.dm_default_key.options_format.version",
+             (GetFirstApiLevel() <= __ANDROID_API_Q__ ? 1 : 2));
+@@ -400,6 +492,9 @@ bool fscrypt_mount_metadata_encrypted(const std::string& blk_device, const std::
+             status_t error;
+ 
+             if (fs_type == "ext4") {
++                // Mapping setup and the progress marker do not format userdata.
++                // Keep the one-shot grant until the first destructive operation.
++                if (skyward_format && !ConsumeSkywardMkfsToken()) return false;
+                 error = ext4::Format(crypto_blkdev, 0, mount_point);
+             } else if (fs_type == "f2fs") {
+                 error = f2fs::Format(crypto_blkdev, is_zoned, crypto_user_blkdev, device_aliased,
+@@ -429,7 +524,9 @@ bool fscrypt_mount_metadata_encrypted(const std::string& blk_device, const std::
+     }
+ 
+     LOG(DEBUG) << "Mounting metadata-encrypted filesystem:" << mount_point;
+-    mount_via_fs_mgr(mount_point.c_str(), crypto_blkdev.c_str(), needs_encrypt);
++    if (!mount_via_fs_mgr(mount_point.c_str(), crypto_blkdev.c_str(), needs_encrypt)) {
++        return false;
++    }
+ 
+     // Record that there's at least one fstab entry with metadata encryption
+     if (!android::base::SetProperty("ro.crypto.metadata.enabled", "true")) {

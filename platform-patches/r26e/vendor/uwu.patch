@@ -1,0 +1,45 @@
+diff --git a/build/core/utils.mk b/build/core/utils.mk
+index 80e22d031be2ea25214281933b961105f56130a8..c88269b2decd4d285ec52b98eccc95784ed90668 100644
+--- a/build/core/utils.mk
++++ b/build/core/utils.mk
+@@ -127,6 +127,9 @@ $(strip \
+ endef
+ 
+ # $(call add-radio-file-sha1-checked,path,sha1)
++# Guests reuse the host radio; do not even resolve or hash generated radio
++# inputs when an extraction emits a normal radio declaration.
++ifeq ($(filter uwu_dada uwu_fuxi,$(TARGET_PRODUCT)),)
+ define add-radio-file-sha1-checked
+   $(eval path := $(LOCAL_PATH)/$(1))
+   $(eval sha1 := $(shell sha1sum "$(path)" | cut -d" " -f 1))
+@@ -134,3 +137,7 @@ define add-radio-file-sha1-checked
+     $(call add-radio-file,$(1)),
+     $(error $(path) SHA1 mismatch ($(sha1) != $(2))))
+ endef
++else
++define add-radio-file-sha1-checked
++endef
++endif
+diff --git a/config/common.mk b/config/common.mk
+index 74f72b06f68e87677e8c0c7d913b258525c3e0b6..68e53f29530520caca44a5f1765652ab90677ca8 100644
+--- a/config/common.mk
++++ b/config/common.mk
+@@ -28,7 +28,6 @@ $(call inherit-product-if-exists, vendor/extra/product.mk)
+ 
+ # uwuAOSP components
+ PRODUCT_PACKAGES += \
+-    Updater \
+     uwuSettingsExt \
+     uwuClock \
+     CatShare \
+@@ -37,6 +36,10 @@ PRODUCT_PACKAGES += \
+     uwuPrism \
+     ThemePicker
+ 
++ifeq ($(filter uwu_dada uwu_fuxi,$(TARGET_PRODUCT)),)
++PRODUCT_PACKAGES += Updater
++endif
++
+ # Lineage interfaces
+ PRODUCT_PACKAGES += \
+     framework_compatibility_matrix.lineage.xml

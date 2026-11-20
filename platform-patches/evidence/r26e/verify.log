@@ -1,0 +1,5 @@
+build=0 guard=0
+uwuAOSP-src/system/core/gatekeeperd/Android.bp: OK
+uwuAOSP-src/system/core/gatekeeperd/gatekeeperd.cpp: OK
+uwuAOSP-src/device/xiaomi/skyward-guest/product.mk: OK
+PASS system and vendor fsck, system readback, fuxi VINTF

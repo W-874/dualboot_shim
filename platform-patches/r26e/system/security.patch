@@ -1,0 +1,76 @@
+diff --git a/keystore2/src/km_compat.rs b/keystore2/src/km_compat.rs
+index 0036d2935809bb18589a8ff44788535403f3a1c5..160e20b2c7c053270e3a34ae842229a37a7a0737 100644
+--- a/keystore2/src/km_compat.rs
++++ b/keystore2/src/km_compat.rs
+@@ -33,6 +33,17 @@ use android_security_compat::aidl::android::security::compat::IKeystoreCompatSer
+ use anyhow::Context;
+ use keystore2_crypto::{hmac_sha256, HMAC_SHA256_LEN};
+ 
++fn reject_skyward_guest_destructive_operation() -> binder::Result<()> {
++    match rustutils::android::system_properties::read("ro.skyward.guest") {
++        Ok(value) if value.as_deref() != Some("true") => Ok(()),
++        Ok(_) => Err(binder::Status::new_service_specific_error(ErrorCode::UNIMPLEMENTED.0, None)),
++        Err(e) => {
++            error!("Failed to read guest product property: {e:?}");
++            Err(binder::Status::new_service_specific_error(ErrorCode::UNKNOWN_ERROR.0, None))
++        }
++    }
++}
++
+ /// Magic prefix used by the km_compat C++ code to mark a key that is owned by an
+ /// underlying Keymaster hardware device that has been wrapped by km_compat. (The
+ /// final zero byte indicates that the blob is not software emulated.)
+@@ -184,10 +195,14 @@ where
+     fn addRngEntropy(&self, data: &[u8]) -> binder::Result<()> {
+         self.real.addRngEntropy(data)
+     }
++
+     fn deleteAllKeys(&self) -> binder::Result<()> {
++        reject_skyward_guest_destructive_operation()?;
+         self.real.deleteAllKeys()
+     }
++
+     fn destroyAttestationIds(&self) -> binder::Result<()> {
++        reject_skyward_guest_destructive_operation()?;
+         self.real.destroyAttestationIds()
+     }
+     fn deviceLocked(
+diff --git a/keystore2/src/km_compat/km_compat.cpp b/keystore2/src/km_compat/km_compat.cpp
+index 87bf5da346c6c17bb6789068630a6e6c3d827dfd..ac6c8b148e80654be20679cdf7b758fc2aca56b4 100644
+--- a/keystore2/src/km_compat/km_compat.cpp
++++ b/keystore2/src/km_compat/km_compat.cpp
+@@ -24,6 +24,7 @@
+ #include <aidl/android/hardware/security/keymint/KeyParameterValue.h>
+ #include <aidl/android/hardware/security/keymint/PaddingMode.h>
+ #include <android-base/logging.h>
++#include <android-base/properties.h>
+ #include <android/hidl/manager/1.2/IServiceManager.h>
+ #include <binder/IServiceManager.h>
+ #include <hardware/keymaster_defs.h>
+@@ -671,6 +672,9 @@ ScopedAStatus KeyMintDevice::deleteKey(const std::vector<uint8_t>& prefixedKeyBl
+ }
+ 
+ ScopedAStatus KeyMintDevice::deleteAllKeys() {
++    if (android::base::GetProperty("ro.skyward.guest", "") == "true") {
++        return convertErrorCode(KMV1::ErrorCode::UNIMPLEMENTED);
++    }
+     auto result = mDevice->deleteAllKeys();
+     if (!result.isOk()) {
+         LOG(ERROR) << __func__ << " transaction failed. " << result.description();
+diff --git a/keystore2/src/maintenance.rs b/keystore2/src/maintenance.rs
+index b192f8439d455c21815b109d73ddd96a02be3551..2b0fbdc8bf61c0cce11773c4f28558481fe7faf5 100644
+--- a/keystore2/src/maintenance.rs
++++ b/keystore2/src/maintenance.rs
+@@ -383,6 +383,12 @@ impl Maintenance {
+         // Security critical permission check. This statement must return on fail.
+         check_keystore_permission(KeystorePerm::DeleteAllKeys)
+             .context(ks_err!("Checking permission"))?;
++        if rustutils::android::system_properties::read("ro.skyward.guest")
++            .context(ks_err!("Reading guest product property"))?
++            .as_deref() == Some("true")
++        {
++            return Err(Error::perm()).context(ks_err!("deleteAllKeys disabled on Skyward guest"));
++        }
+         info!("In delete_all_keys.");
+ 
+         Maintenance::call_on_all_security_levels("deleteAllKeys", |dev| dev.deleteAllKeys(), None)

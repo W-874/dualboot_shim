@@ -1,0 +1,16 @@
+diff --git a/fs_mgr.cpp b/fs_mgr.cpp
+index de1ba254027a76ef423f4e169198decf2960419f..2f76f4e59cfe7d0c1649ab24cd924eec28c442e2 100644
+--- a/fs_mgr.cpp
++++ b/fs_mgr.cpp
+@@ -1744,6 +1744,11 @@ int fs_mgr_mount_all(Fstab* fstab, int mount_mode) {
+                                android::base::Join(formattable_entry->device_aliased, ' ')},
+                               nullptr)) {
+                     LERROR << "Encryption failed";
++                    if (current_entry.blk_device == "/dev/block/skyward/userdata" ||
++                        formattable_entry->blk_device == "/dev/block/skyward/userdata") {
++                        // Never create a plaintext filesystem beneath the guest's encrypted one.
++                        return FS_MGR_MNTALL_FAIL;
++                    }
+                 } else {
+                     userdata_mounted = true;
+                     continue;

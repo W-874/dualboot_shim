@@ -1,0 +1,96 @@
+diff --git a/core/soong_config.mk b/core/soong_config.mk
+index 99bd4429b1226ff7b89a1a56620a3bac46a2eea7..cf6b32eba172c202093be0aa5ea71d929dc2d128 100644
+--- a/core/soong_config.mk
++++ b/core/soong_config.mk
+@@ -458,6 +458,7 @@ $(call add_json_map, PartitionVarsForSoongMigrationOnlyDoNotUse)
+   $(call add_json_bool, BoardUsesFullRecoveryImage, $(filter true,$(BOARD_USES_FULL_RECOVERY_IMAGE)))
+   $(call add_json_str, BoardInitBootHeaderVersion, $(BOARD_INIT_BOOT_HEADER_VERSION))
+   $(call add_json_bool, BoardUsesGenericKernelImage, $(BOARD_USES_GENERIC_KERNEL_IMAGE))
++  $(call add_json_list, BoardRootExtraFolders, $(BOARD_ROOT_EXTRA_FOLDERS))
+   $(call add_json_str, BootSecurityPatch, $(BOOT_SECURITY_PATCH))
+   $(call add_json_str, InitBootSecurityPatch, $(INIT_BOOT_SECURITY_PATCH))
+   $(call add_json_str, VendorSecurityPatch, $(VENDOR_SECURITY_PATCH))
+diff --git a/target/product/base_system.mk b/target/product/base_system.mk
+index 678459f5b1be9641b91d410f0a0cd8199a64d56d..044bf99cf43b9f428a0eff9cede596961f09352f 100644
+--- a/target/product/base_system.mk
++++ b/target/product/base_system.mk
+@@ -119,8 +119,6 @@ PRODUCT_PACKAGES += \
+     fs_config_dirs_system \
+     gpu_counter_producer \
+     group_system \
+-    gsid \
+-    gsi_tool \
+     heapprofd \
+     heapprofd_client \
+     hidservice \
+@@ -348,12 +346,14 @@ ifneq ($(PRODUCT_IS_ATV),true)
+ 
+ endif
+ 
++ifeq ($(filter uwu_dada uwu_fuxi,$(TARGET_PRODUCT)),)
+ # Product does not support Dynamic System Update
+ ifneq ($(PRODUCT_NO_DYNAMIC_SYSTEM_UPDATE),true)
+     PRODUCT_PACKAGES += \
+         DynamicSystemInstallationService \
+ 
+ endif
++endif
+ 
+ # Check if the build supports NFC apex or not
+ ifeq ($(RELEASE_PACKAGE_NFC_STACK),NfcNci)
+@@ -643,6 +643,10 @@ ifneq (,$(RELEASE_NATIVE_FRAMEWORK_PROTOTYPE))
+         zygote_next
+ endif
+ 
++# Skyward guests cannot install or manage dynamic system updates.
++ifeq ($(filter uwu_dada uwu_fuxi,$(TARGET_PRODUCT)),)
++PRODUCT_PACKAGES += gsid gsi_tool
++
+ # Whether to use Java or new native (Rust) OMAPI implementation
+ ifeq ($(RELEASE_NATIVE_OMAPI),true)
+     PRODUCT_PACKAGES += \
+@@ -651,6 +655,7 @@ else
+     PRODUCT_PACKAGES += \
+         SecureElement
+ endif
++endif
+ 
+ ifneq (,$(RELEASE_AISEAL_FRAMEWORK))
+     PRODUCT_PACKAGES += \
+diff --git a/target/product/core_64_bit.mk b/target/product/core_64_bit.mk
+index 790f57b634f68491838179aebc91fa45389891ef..7197bf010b850526a34d7f9472c162fdcd905347 100644
+--- a/target/product/core_64_bit.mk
++++ b/target/product/core_64_bit.mk
+@@ -30,7 +30,8 @@ PRODUCT_PACKAGES += init.zygote64.rc init.zygote64_32.rc
+ ifeq ($(ZYGOTE_FORCE_64),true)
+ PRODUCT_VENDOR_PROPERTIES += ro.zygote=zygote64
+ else
+-PRODUCT_VENDOR_PROPERTIES += ro.zygote=zygote64_32
++# Products with a 64-bit-only runtime can override this default.
++PRODUCT_VENDOR_PROPERTIES += ro.zygote?=zygote64_32
+ endif
+ 
+ TARGET_SUPPORTS_32_BIT_APPS := true
+diff --git a/target/product/handheld_system.mk b/target/product/handheld_system.mk
+index 6bd76e6582b2470f780b20b9e2afecf9b9b86d90..b2f5d1ea84624bf985d35490147aa2910cbfcddc 100644
+--- a/target/product/handheld_system.mk
++++ b/target/product/handheld_system.mk
+@@ -67,7 +67,6 @@ PRODUCT_PACKAGES += \
+     PrivateSpace \
+     ProxyHandler \
+     screenrecord \
+-    SecureElement \
+     SharedStorageBackup \
+     SimAppDialog \
+     TeleService \
+@@ -83,6 +82,10 @@ ifeq ($(RELEASE_ACONFIG_INCLUDE_EYE_DROPPER_APP),true)
+   PRODUCT_PACKAGES += EyeDropper
+ endif
+ 
++ifeq ($(filter uwu_dada uwu_fuxi,$(TARGET_PRODUCT)),)
++PRODUCT_PACKAGES += SecureElement
++endif
++
+ # Choose the correct products based on HSUM status
+ ifeq ($(PRODUCT_USE_HSUM),true)
+   PRODUCT_PACKAGES += TelephonyProviderHsum

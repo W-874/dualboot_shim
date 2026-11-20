@@ -1,0 +1,127 @@
+diff --git a/gatekeeperd/Android.bp b/gatekeeperd/Android.bp
+index f37bb81e2b18fd25cb8258ff4721dca18a61c91f..fa3c3ad42af72b917b8d9540e3e88dde9e6f2c4b 100644
+--- a/gatekeeperd/Android.bp
++++ b/gatekeeperd/Android.bp
+@@ -53,10 +53,28 @@ cc_defaults {
+     include_dirs: ["external/scrypt/lib/crypto"],
+ }
+ 
++soong_config_module_type {
++    name: "skyward_gatekeeper_cc_defaults",
++    module_type: "cc_defaults",
++    config_namespace: "skyward",
++    bool_variables: ["guest_gatekeeper"],
++    properties: ["cflags"],
++}
++
++skyward_gatekeeper_cc_defaults {
++    name: "skyward_gatekeeper_product_defaults",
++    soong_config_variables: {
++        guest_gatekeeper: {
++            cflags: ["-DSKYWARD_GUEST_GATEKEEPER"],
++        },
++    },
++}
++
+ cc_binary {
+     name: "gatekeeperd",
+     defaults: [
+         "gatekeeperd_defaults",
++        "skyward_gatekeeper_product_defaults",
+     ],
+     srcs: [
+         "main.cpp",
+diff --git a/gatekeeperd/gatekeeperd.cpp b/gatekeeperd/gatekeeperd.cpp
+index 7cea05313661778fa8f3993d7ac9333d791b8e13..45b2d1859645485b9ca0279a941040d86c74024c 100644
+--- a/gatekeeperd/gatekeeperd.cpp
++++ b/gatekeeperd/gatekeeperd.cpp
+@@ -61,6 +61,15 @@ constexpr const char gatekeeperServiceName[] = "android.hardware.gatekeeper.IGat
+ 
+ namespace {
+ 
++#ifdef SKYWARD_GUEST_GATEKEEPER
++constexpr bool kSkywardGuest = true;
++#else
++constexpr bool kSkywardGuest = false;
++#endif
++constexpr uint32_t kLogicalUserIdLimit = 1000000;
++constexpr uint32_t kGsiUserIdOffset = 1000000;
++constexpr uint32_t kGuestUserIdOffset = 2000000;
++
+ template <typename T, typename OutIter>
+ inline OutIter copy_bytes_to_iterator(const T& value, OutIter dest) {
+     const uint8_t* value_ptr = reinterpret_cast<const uint8_t*>(&value);
+@@ -113,6 +122,16 @@ std::vector<uint8_t> authToken2AidlVec(const std::optional<HardwareAuthToken>& t
+ 
+ GateKeeperProxy::GateKeeperProxy() {
+     clear_state_if_needed_done = false;
++    is_running_gsi = android::base::GetBoolProperty(android::gsi::kGsiBootedProp, false);
++
++    // A different logical UID is not proof that the shared HAL/TEE isolates its state.
++    // No backend has been qualified and bound to this guest build. Do not acquire either
++    // service; the credential paths will see no HAL and fail without forwarding a request.
++    if (kSkywardGuest) {
++        LOG(WARNING) << "Shared Gatekeeper backend is not approved for Skyward guest";
++        return;
++    }
++
+     if (AServiceManager_isDeclared(gatekeeperServiceName)) {
+         ::ndk::SpAIBinder ks2Binder(AServiceManager_waitForService(gatekeeperServiceName));
+         aidl_hw_device = AidlIGatekeeper::fromBinder(ks2Binder);
+@@ -120,7 +139,6 @@ GateKeeperProxy::GateKeeperProxy() {
+     if (!aidl_hw_device) {
+         hw_device = IGatekeeper::getService();
+     }
+-    is_running_gsi = android::base::GetBoolProperty(android::gsi::kGsiBootedProp, false);
+ 
+     if (!aidl_hw_device && !hw_device) {
+         LOG(ERROR) << "Could not find Gatekeeper device, which makes me very sad.";
+@@ -144,7 +162,8 @@ void GateKeeperProxy::clear_state_if_needed() {
+         return;
+     }
+ 
+-    if (mark_cold_boot() && !is_running_gsi) {
++    // Keep the local cold-boot marker, but never reset shared Gatekeeper state in a guest.
++    if (mark_cold_boot() && !is_running_gsi && !kSkywardGuest) {
+         ALOGI("cold boot: clearing state");
+         if (aidl_hw_device) {
+             aidl_hw_device->deleteAllUsers();
+@@ -199,8 +218,7 @@ void GateKeeperProxy::clear_sid(uint32_t userId) {
+ }
+ 
+ Status GateKeeperProxy::adjust_userId(uint32_t userId, uint32_t* hw_userId) {
+-    static constexpr uint32_t kGsiOffset = 1000000;
+-    if (userId >= kGsiOffset) {
++    if (userId >= kLogicalUserIdLimit) {
+         return Status::fromExceptionCode(Status::EX_ILLEGAL_ARGUMENT);
+     }
+ 
+@@ -208,11 +226,13 @@ Status GateKeeperProxy::adjust_userId(uint32_t userId, uint32_t* hw_userId) {
+         return Status::fromExceptionCode(Status::EX_ILLEGAL_STATE);
+     }
+ 
+-    if (is_running_gsi) {
+-        *hw_userId = userId + kGsiOffset;
+-        return Status::ok();
++    if (kSkywardGuest) {
++        *hw_userId = userId + kGuestUserIdOffset;
++    } else if (is_running_gsi) {
++        *hw_userId = userId + kGsiUserIdOffset;
++    } else {
++        *hw_userId = userId;
+     }
+-    *hw_userId = userId;
+     return Status::ok();
+ }
+ 
+@@ -481,6 +501,10 @@ Status GateKeeperProxy::clearSecureUserId(int32_t userId) {
+         return Status::ok();
+     }
+     clear_sid(userId);
++    // Clearing the guest's local SID is safe; deleting the HAL user is not.
++    if (kSkywardGuest) {
++        return Status::ok();
++    }
+ 
+     uint32_t hw_userId = 0;
+     Status result = adjust_userId(userId, &hw_userId);

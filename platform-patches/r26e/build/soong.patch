@@ -1,0 +1,24 @@
+diff --git a/android/variable.go b/android/variable.go
+index 28d96d839031bf79b28a11e8875a0088a6f8bce3..7cc7bce1fcef08c90beb8b3c8a26698886fb0d4a 100644
+--- a/android/variable.go
++++ b/android/variable.go
+@@ -678,6 +678,7 @@ type PartitionVariables struct {
+ 	BoardUsesFullRecoveryImage          bool     `json:",omitempty"`
+ 	BoardInitBootHeaderVersion          string   `json:",omitempty"`
+ 	BoardUsesGenericKernelImage         bool     `json:",omitempty"`
++	BoardRootExtraFolders               []string `json:",omitempty"`
+ 	BootSecurityPatch                   string   `json:",omitempty"`
+ 	InitBootSecurityPatch               string   `json:",omitempty"`
+ 	BoardIncludeDtbInBootimg            bool     `json:",omitempty"`
+diff --git a/fsgen/filesystem_creator.go b/fsgen/filesystem_creator.go
+index bad6b73b081d78ab912082c1b3f2702245583012..4d65ea8d9afd2d06e9fcc808fa7783d16c1a0491 100644
+--- a/fsgen/filesystem_creator.go
++++ b/fsgen/filesystem_creator.go
+@@ -1006,6 +1006,7 @@ func partitionSpecificFsProps(ctx android.EarlyModuleContext, partitions allGene
+ 
+ 		fsProps.Base_dir = proptools.StringPtr("system")
+ 		fsProps.Dirs = proptools.NewSimpleConfigurable(commonPartitionDirs)
++		fsProps.Dirs.AppendSimpleValue(partitionVars.BoardRootExtraFolders)
+ 		fsProps.Security_patch = proptools.StringPtr(ctx.Config().PlatformSecurityPatch())
+ 		fsProps.Stem = proptools.StringPtr("system.img")
+ 	case "system_ext":
