@@ -1,0 +1,11 @@
+diff --git a/private/compat/33.0/33.0.compat.cil b/private/compat/33.0/33.0.compat.cil
+index b296fc1d930453f5f0d464609a1107f459b00f68..a4ab169833bcc4a9c925012d8fd74072f890f406 100644
+--- a/private/compat/33.0/33.0.compat.cil
++++ b/private/compat/33.0/33.0.compat.cil
+@@ -19,3 +19,6 @@
+ ;; New system images do not allow open() to work on ashmem for all domains,
+ ;; so add it for compatibility with older vendor images.
+ (allow domain ashmem_libcutils_device (chr_file (open)))
++
++;; Fuxi's API 33 vendor policy references this stock system_ext type.
++(type proc_sys_walt)

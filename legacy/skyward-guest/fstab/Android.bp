@@ -1,0 +1,49 @@
+python_binary_host {
+    name: "skyward_guest_fstab_lint",
+    main: "tools/fstab-lint.py",
+    srcs: ["tools/fstab-lint.py"],
+}
+
+genrule_defaults {
+    name: "skyward_guest_checked_fstab_defaults",
+    tools: ["skyward_guest_fstab_lint"],
+    out: ["fstab.qcom", "charger_fw_fstab.qti"],
+}
+
+genrule {
+    name: "skyward_guest_checked_fstab_fuxi",
+    defaults: ["skyward_guest_checked_fstab_defaults"],
+    srcs: ["fuxi/fstab.qcom", "fuxi/charger_fw_fstab.qti"],
+    cmd: "$(location skyward_guest_fstab_lint) --device fuxi " +
+        "--fstab $(location fuxi/fstab.qcom) --charger $(location fuxi/charger_fw_fstab.qti) " +
+        "--checked-dir $(genDir)",
+}
+
+genrule {
+    name: "skyward_guest_checked_fstab_dada",
+    defaults: ["skyward_guest_checked_fstab_defaults"],
+    srcs: ["dada/fstab.qcom", "dada/charger_fw_fstab.qti"],
+    cmd: "$(location skyward_guest_fstab_lint) --device dada " +
+        "--fstab $(location dada/fstab.qcom) --charger $(location dada/charger_fw_fstab.qti) " +
+        "--checked-dir $(genDir)",
+}
+
+prebuilt_etc {
+    name: "skyward_guest_fstab_fuxi",
+    enabled: select(soong_config_variable("skyward", "guest_device"), {
+        "fuxi": true,
+        default: false,
+    }),
+    vendor: true,
+    srcs: [":skyward_guest_checked_fstab_fuxi"],
+}
+
+prebuilt_etc {
+    name: "skyward_guest_fstab_dada",
+    enabled: select(soong_config_variable("skyward", "guest_device"), {
+        "dada": true,
+        default: false,
+    }),
+    vendor: true,
+    srcs: [":skyward_guest_checked_fstab_dada"],
+}

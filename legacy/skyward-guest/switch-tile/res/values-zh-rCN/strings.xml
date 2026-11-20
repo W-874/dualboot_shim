@@ -1,0 +1,7 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="tile_label">切回 HyperOS</string>
+    <string name="switch_message">要重启此设备并切回已安装的 HyperOS 吗？</string>
+    <string name="switch_confirm">重启并切回</string>
+    <string name="switch_failed">无法发出切回请求，设备未重启。</string>
+</resources>

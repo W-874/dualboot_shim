@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# Installed only by standalone Xiaomi products.
+on post-fs-data
+    mkdir /data/vendor/secure_element 0777 system system
+
+service esepmdaemon /system/vendor/bin/esepmdaemon
+    class core
+    user system
+    group nfc

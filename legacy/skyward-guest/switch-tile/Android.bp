@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+android_app {
+    name: "SkywardSwitchTile",
+    vendor: true,
+    certificate: "platform",
+    sdk_version: "current",
+    min_sdk_version: "35",
+    srcs: ["src/**/*.java"],
+    jni_libs: ["libskyward_switch_tile_jni"],
+    use_embedded_native_libs: true,
+}
+
+cc_library_shared {
+    name: "libskyward_switch_tile_jni",
+    vendor: true,
+    sdk_version: "35",
+    min_sdk_version: "35",
+    stl: "none",
+    srcs: ["switch_request.cpp"],
+    header_libs: ["jni_headers"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}

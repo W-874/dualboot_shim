@@ -1,0 +1,13 @@
+{
+  "overlay": {
+    "sepolicy": [
+      "dir",
+      493
+    ],
+    "sepolicy/vendor": [
+      "dir",
+      493
+    ]
+  },
+  "remove": []
+}
