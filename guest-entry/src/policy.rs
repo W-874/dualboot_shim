@@ -8,21 +8,9 @@ const PERMITTED: [&str; 4] = ["userdata", "misc", "modemst1", "modemst2"];
 const FATAL: &str = "androidboot.init_fatal_reboot_target";
 
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum DeviceProfile {
-    Fuxi,
-    Dada,
-}
-
-impl DeviceProfile {
-    pub fn codename(self) -> &'static str {
-        match self {
-            Self::Fuxi => "fuxi",
-            Self::Dada => "dada",
-        }
-    }
-}
+use crate::profile::DeviceProfile;
+#[cfg(test)]
+use crate::profile::{DeviceTree, device_matches};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -112,91 +100,8 @@ const DROP_ANDROID_VALUES: &[(&str, &str)] = &[
     ("androidboot.init_fatal_panic", "true"),
 ];
 const DROP_CMDLINE_KEYS: &[&str] = &["root", "rootfstype", "rootflags", "dm", "dm-mod.create", "dm-mod.waitfor"];
-const DEVICE_KEYS: [&str; 3] = ["androidboot.product.device", "androidboot.device", "androidboot.product.vendor.device"];
-pub const UFS: &str = "1d84000.ufshc";
-pub const UFS_PATH: &str = "soc/1d84000.ufshc";
-#[cfg(target_os = "android")]
-pub const FUXI_TOUCH_FW: &str = "soc/qcom,qupv3_1_geni_se@ac0000/spi@a90000/fts@0/fts,default-fw-name";
-#[cfg(target_os = "android")]
-pub const DADA_TOUCH_FW: &str = "soc/qcom,qupv3_1_geni_se@ac0000/spi@a88000/synaptics_tcm@0/synaptics,default-fw-image-name";
 const SLOT: &str = "androidboot.slot_suffix";
 
-fn params<'a>(bootconfig: &'a str, cmdline: &'a str) -> impl Iterator<Item = (&'a str, &'a str)> {
-    bootconfig.lines().filter_map(|line| line.split_once('=')).chain(cmdline.split_ascii_whitespace().filter_map(|word| word.split_once('=')))
-        .map(|(key, value)| {
-            let value = value.trim();
-            (key.trim(), value.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(value))
-        })
-}
-
-pub struct DeviceTree<'a> {
-    pub compatible: &'a [u8],
-    pub model: &'a [u8],
-    pub fuxi_touch_fw: &'a [u8],
-    pub dada_touch_fw: &'a [u8],
-}
-
-pub fn device_matches(profile: DeviceProfile, bootconfig: &str, cmdline: &str, dt: DeviceTree<'_>) -> bool {
-    use DeviceProfile::{Dada, Fuxi};
-    let mut named = false;
-    let mut kalama = false;
-    let mut sun = false;
-    let mut twin = false;
-    for (is_compatible, prop) in [(true, dt.compatible), (false, dt.model)] {
-        for value in prop.split(|&b| b == 0) {
-            let board = match value {
-                b"fuxi" | b"xiaomi,fuxi" | b"Qualcomm Technologies, Inc. 8550 fuxi" => Fuxi,
-                b"dada" | b"xiaomi,dada" => Dada,
-                // Dada's stock DTBO has the stale Haotian model. It is not
-                // board evidence; the applied touchscreen property is required below.
-                b"Qualcomm Technologies, Inc. Haotian based on SM8750" if profile == Dada && !is_compatible => continue,
-                b"qcom,kalama" | b"qcom,kalama-mtp" | b"qcom,kalamap" | b"qcom,kalamap-mtp" => {
-                    kalama = true;
-                    continue;
-                }
-                b"qcom,sun" | b"qcom,sun-mtp" | b"qcom,sunp" | b"qcom,sunp-mtp" if is_compatible => {
-                    sun = true;
-                    continue;
-                }
-                b"linux,dummy-virt" => {
-                    twin = true;
-                    continue;
-                }
-                b"haotian" | b"Haotian" => return false,
-                other if other.starts_with(b"xiaomi,")
-                    || other.starts_with(b"Qualcomm Technologies, Inc. 8550 ")
-                    || (other.starts_with(b"Qualcomm Technologies, Inc. ") && other.ends_with(b" based on SM8750")) => return false,
-                _ => continue,
-            };
-            if board != profile { return false; }
-            named = true;
-        }
-    }
-
-    let fuxi_touch = dt.fuxi_touch_fw == b"st_fts_m3.ftb\0";
-    // Stock OS4.0.0.22 DTBO fragment@59 targets qupv3_se2_spi. The
-    // firmware filename is also in Dada's proprietary file inventory.
-    let dada_touch = dt.dada_touch_fw == b"synaptics_spi_dada_00.img\0";
-    let mut twin_hardware = false;
-    for (key, value) in params(bootconfig, cmdline) {
-        if DEVICE_KEYS.contains(&key) {
-            if value != profile.codename() { return false; }
-            named = true;
-        } else if matches!(key, "androidboot.hardware" | "androidboot.hardware.platform") {
-            match (profile, value) {
-                (Dada, "qcom" | "dada" | "sun" | "sunp" | "sm8750") => (),
-                (Dada, _) => return false,
-                (Fuxi, "dada" | "sun" | "sunp" | "sm8750" | "haotian" | "nuwa" | "ishtar" | "babylon" | "babybus" | "socrates" | "vermeer") => return false,
-                (Fuxi, "fuxi") if key == "androidboot.hardware" => twin_hardware = true,
-                _ => (),
-            }
-        }
-    }
-    match profile {
-        Fuxi => !sun && !dada_touch && (named || (kalama && fuxi_touch) || (twin && twin_hardware)),
-        Dada => sun && !kalama && !twin && dada_touch && !fuxi_touch,
-    }
-}
 
 fn proc_cmdline_words(mut input: &str) -> impl Iterator<Item = &str> {
     std::iter::from_fn(move || {
@@ -321,13 +226,13 @@ fn controller_array<'a>(devices: impl IntoIterator<Item = &'a str>) -> String {
     array
 }
 
-pub fn sanitized(bootconfig: &str, cmdline: &str, on_ufs: bool) -> Result<(String, String)> {
+pub fn sanitized(bootconfig: &str, cmdline: &str, controller: Option<(&str, &str)>) -> Result<(String, String)> {
     let mut out = BTreeMap::new();
     for record in bootconfig.split('\n') {
         let (key, value) = record.split_once('=').unwrap_or((record, ""));
         let key = key.trim_ascii();
         if !valid_android_key(key) || key == FATAL || DROP_ANDROID_KEYS.contains(&key)
-            || (on_ufs && matches!(key, BOOT_DEVICES | BOOT_DEVICE | BOOTDEVICE))
+            || (controller.is_some() && matches!(key, BOOT_DEVICES | BOOT_DEVICE | BOOTDEVICE))
         {
             continue;
         }
@@ -352,7 +257,7 @@ pub fn sanitized(bootconfig: &str, cmdline: &str, on_ufs: bool) -> Result<(Strin
             continue;
         }
         if !valid_android_key(&key) || key == FATAL || DROP_ANDROID_KEYS.contains(&key.as_ref())
-            || (on_ufs && matches!(key.as_ref(), BOOT_DEVICES | BOOT_DEVICE | BOOTDEVICE))
+            || (controller.is_some() && matches!(key.as_ref(), BOOT_DEVICES | BOOT_DEVICE | BOOTDEVICE))
         {
             continue;
         }
@@ -368,10 +273,10 @@ pub fn sanitized(bootconfig: &str, cmdline: &str, on_ufs: bool) -> Result<(Strin
     }
     ensure!(out.contains_key(SLOT), "missing active slot");
 
-    if on_ufs {
+    if let Some((path, name)) = controller {
         // ueventd needs the platform path; Qualcomm init uses the basename.
-        out.insert(Cow::Borrowed(BOOT_DEVICES), BootValue::Scalar(Cow::Borrowed(UFS_PATH)));
-        out.insert(Cow::Borrowed(BOOTDEVICE), BootValue::Scalar(Cow::Borrowed(UFS)));
+        out.insert(Cow::Borrowed(BOOT_DEVICES), BootValue::Scalar(Cow::Borrowed(path)));
+        out.insert(Cow::Borrowed(BOOTDEVICE), BootValue::Scalar(Cow::Borrowed(name)));
     } else {
         let devices = match config_devices {
             Some(wire @ BootValue::Serialized(_)) => Some(wire),
@@ -414,15 +319,10 @@ pub fn sanitized(bootconfig: &str, cmdline: &str, on_ufs: bool) -> Result<(Strin
 
 const VOLUME_OPTIONS: &str = "rw,noatime,nosuid,nodev";
 const DATA_FLAGS: &str = "wait,check,latemount,formattable,fileencryption=aes-256-xts:aes-256-cts:v2,metadata_encryption=aes-256-xts,keydirectory=/metadata/vold/metadata_encryption";
-const MODEM: [&str; 5] = ["/dev/block/bootdevice/by-name/modem", "/vendor/firmware_mnt", "vfat", "ro,shortname=lower,uid=1000,gid=1000,dmask=227,fmask=337,context=u:object_r:firmware_file:s0", "wait,slotselect"];
-const MODEM_FIRMWARE: [&str; 5] = ["/dev/block/bootdevice/by-name/modemfirmware", "/vendor/modem_firmware", "vfat", MODEM[3], "wait,slotselect"];
-const FSTAB: [[&str; 5]; 6] = [
+pub const PRIVATE_FSTAB: [[&str; 5]; 3] = [
     ["/dev/block/skyward/metadata", "/metadata", "ext4", VOLUME_OPTIONS, "wait,check,formattable"],
     ["/dev/block/skyward/userdata", "/data", "ext4", VOLUME_OPTIONS, DATA_FLAGS],
     ["/dev/block/skyward/persist", "/mnt/vendor/persist", "ext4", VOLUME_OPTIONS, "wait"],
-    MODEM,
-    ["/dev/block/bootdevice/by-name/dsp", "/vendor/dsp", "ext4", "ro,nosuid,nodev,noload", "wait,slotselect"],
-    ["/dev/block/bootdevice/by-name/bluetooth", "/vendor/bt_firmware", "vfat", "ro,shortname=lower,uid=1002,gid=3002,dmask=227,fmask=337,context=u:object_r:bt_firmware_file:s0", "wait,slotselect"],
 ];
 
 fn same_options(actual: &str, expected: &str) -> bool {
@@ -434,14 +334,16 @@ fn same_options(actual: &str, expected: &str) -> bool {
 /// Enforce the selected guest's mount contract before Android runs. Metadata
 /// is already formatted; only a fresh guest userdata loop gets Android's format flag.
 pub fn guarded_fstab(profile: DeviceProfile, text: &str, charger: bool, grant: bool) -> Result<String> {
-    let (common, extra) = if charger {
-        (std::slice::from_ref(&MODEM), None)
+    let profile = profile.description()?;
+    let (common, firmware) = if charger {
+        (&[][..], &profile.mounts.charger)
     } else {
-        (&FSTAB[..], (profile == DeviceProfile::Dada).then_some(&MODEM_FIRMWARE))
+        (&PRIVATE_FSTAB[..], &profile.mounts.firmware)
     };
-    let count = common.len() + extra.is_some() as usize;
+    let rows = || common.iter().copied().chain(firmware.iter().map(|row| row.each_ref().map(String::as_str)));
+    let count = common.len() + firmware.len();
     let mut result = String::with_capacity(text.len());
-    let mut seen = 0u8;
+    let mut seen = 0u32;
     for line in text.lines() {
         ensure!(!line.bytes().any(|b| b.is_ascii_control() && b != b'\t'), "control character in Android fstab");
         let mut fields = line.split_once('#').map_or(line, |(line, _)| line).split_ascii_whitespace();
@@ -449,7 +351,7 @@ pub fn guarded_fstab(profile: DeviceProfile, text: &str, charger: bool, grant: b
         let (Some(target), Some(ty), Some(options), Some(flags), None) =
             (fields.next(), fields.next(), fields.next(), fields.next(), fields.next())
         else { bail!("malformed Android fstab row") };
-        let (idx, row) = common.iter().chain(extra).enumerate().find(|(_, row)| row[..3] == [source, target, ty])
+        let (idx, row) = rows().enumerate().find(|(_, row)| row[..3] == [source, target, ty])
             .with_context(|| format!("unapproved fstab mount {source} -> {target} ({ty})"))?;
         ensure!(seen & (1 << idx) == 0 && same_options(options, row[3]) && same_options(flags, row[4]), "duplicate or unsafe fstab options for {target}");
         seen |= 1 << idx;
@@ -479,6 +381,11 @@ mod tests {
     const FUXI_FSTAB: &str = include_str!("../fixtures/fuxi/fstab.qcom");
     const DADA_FSTAB: &str = include_str!("../fixtures/dada/fstab.qcom");
     const CHARGER_FSTAB: &str = include_str!("../fixtures/charger_fw_fstab.qti");
+
+    fn stock_controller() -> Option<(&'static str, &'static str)> {
+        let stock = Fuxi.description().unwrap();
+        Some((&stock.storage.platform_path, &stock.storage.bootdevice))
+    }
 
     fn fuxi_tree(compatible: &[u8]) -> DeviceTree<'_> {
         DeviceTree { compatible, model: b"", fuxi_touch_fw: b"", dada_touch_fw: b"" }
@@ -605,7 +512,7 @@ mod tests {
     fn fuxi_phone_cmdline_is_preserved() {
         for (raw, build_adc, project_adc) in [(PHONE_CMDLINE, 29361, 4478), (PREVIOUS_PHONE_CMDLINE, 29359, 4476)] {
             for slot in ["_a", "_b"] {
-                let (bc, cl) = sanitized(&phone_bootconfig(slot), raw, true).unwrap();
+                let (bc, cl) = sanitized(&phone_bootconfig(slot), raw, stock_controller()).unwrap();
                 assert_eq!(bc, format!(concat!(
                     "androidboot.boot_devices = \"soc/1d84000.ufshc\"\n",
                     "androidboot.bootdevice = \"1d84000.ufshc\"\n",
@@ -626,7 +533,7 @@ mod tests {
                 }
             }
         }
-        let (_, cl) = sanitized(&phone_bootconfig("_a"), VENDOR_CMDLINE, true).unwrap();
+        let (_, cl) = sanitized(&phone_bootconfig("_a"), VENDOR_CMDLINE, stock_controller()).unwrap();
         assert_eq!(cl, VENDOR_CMDLINE);
         assert_eq!(cl.split_ascii_whitespace().count(), 5);
         assert_eq!(cl.matches("fuxi:13/OS3.0.309.0.WMCCNXM:user").count(), 2);
@@ -637,7 +544,7 @@ mod tests {
         for (raw, hardware, device) in [(QEMU_04, "fuxi", None), (QEMU_05, "qcom", Some("fuxi")), (QEMU_06, "qcom", Some("fuxi"))] {
             // Recreate the cross-source duplicates from the twin import logs.
             let duplicate_config = format!("androidboot.hardware={hardware}\n{SLOT}=_a\n{FATAL}=recovery\n");
-            let (bc, cl) = sanitized(&duplicate_config, raw, false).unwrap();
+            let (bc, cl) = sanitized(&duplicate_config, raw, None).unwrap();
             let mut expected = BTreeMap::from([("androidboot.hardware", hardware), (SLOT, "_a"), (FATAL, "recovery")]);
             if let Some(device) = device { expected.insert("androidboot.device", device); }
             assert_eq!(output_values(&bc), expected);
@@ -678,7 +585,7 @@ mod tests {
             "androidboot.vendor.empty = \"\"\n",
             "androidboot.vendor.opts@:feature-1 = /厂商/a=b\n",
         );
-        let (bc, cl) = sanitized(&bc, &cmd, true).unwrap();
+        let (bc, cl) = sanitized(&bc, &cmd, stock_controller()).unwrap();
         let values = output_values(&bc);
         for (key, value) in metadata {
             assert_eq!(values[format!("androidboot.{key}").as_str()], value);
@@ -712,7 +619,7 @@ mod tests {
             " root=PARTUUID=host rootfstype=ext4 rootflags=ro dm=host dm-mod.create=\"host map\" dm-mod.waitfor=host",
             " rdinit=/init init=/init panic=1 selinux=1 rootdelay=2 dm-mod.unrelated=on opt=\"raw  text = kept\" ftrace_dump_on_oops",
         ));
-        let (bc, cl) = sanitized(&bc, &cl, true).unwrap();
+        let (bc, cl) = sanitized(&bc, &cl, stock_controller()).unwrap();
         let values = output_values(&bc);
         for key in DROP_ANDROID_KEYS.iter().copied().chain([BOOT_DEVICE, "androidboot.init_fatal_panic"]) {
             assert!(!values.contains_key(key), "{key}");
@@ -736,7 +643,7 @@ mod tests {
             "hint=androidboot.init_fatal_panic=true prefix.androidboot.other=1 noandroidboot.debug ",
             "androidboot.init_fatal_reboot_target=fastboot androidboot.init_fatal_panic=true ",
             "opt=\"retain this\"",
-        ), true).unwrap();
+        ), stock_controller()).unwrap();
         assert_eq!(cl, "console=ttyMSM0 opt=\"retain this\"\n");
         // SetFatalRebootTarget branches on raw substring matches. For these
         // simple values the fallback import removes the double quotes.
@@ -750,7 +657,7 @@ mod tests {
     #[test]
     fn host_boot_timeout_is_not_imported() {
         for (config, cmdline) in [("androidboot.boot_timeout = \"25\"\n", ""), ("", "androidboot.boot_timeout=25")] {
-            let (bc, cl) = sanitized(&format!("{SLOT}=_a\n{config}"), cmdline, true).unwrap();
+            let (bc, cl) = sanitized(&format!("{SLOT}=_a\n{config}"), cmdline, stock_controller()).unwrap();
             assert!(!bc.contains("androidboot.boot_timeout"));
             assert!(!cl.contains("androidboot.boot_timeout"));
         }
@@ -760,7 +667,7 @@ mod tests {
     fn sm8550_single_quoted_bootconfig_preserves_wire_values() {
         let quotes = include_str!("../fixtures/fuxi/sm8550-quotes.bootconfig");
         let (bc, _) = sanitized(&format!("{SLOT}=_a\n{quotes}"),
-            "androidboot.vendor.quoted_scalar=fallback androidboot.vendor.quoted_array=fallback", true).unwrap();
+            "androidboot.vendor.quoted_scalar=fallback androidboot.vendor.quoted_array=fallback", stock_controller()).unwrap();
         // AOSP's double-quote-only importer leaves the single quotes in
         // place. Keep the same input bytes, including mixed-array delimiters.
         let wire: Vec<_> = bc.lines().filter(|line| line.starts_with("androidboot.vendor.quoted_")).collect();
@@ -777,7 +684,7 @@ mod tests {
             "androidboot.slot_suffix=_a androidboot.slot_suffix= androidboot.hardware=qcom androidboot.hwc=GL androidboot.mode=normal ",
             "androidboot.vendor.empty=fallback androidboot.selinux=enforcing androidboot.init_fatal_panic=true ",
             "androidboot.vendor.unknown=first androidboot.vendor.unknown=second androidboot.vendor.explicit_empty= androidboot.vendor.explicit_empty=second",
-        ), false).unwrap();
+        ), None).unwrap();
         let values = output_values(&bc);
         assert_eq!(values["androidboot.hwc"], "CN");
         assert_eq!(values["androidboot.mode"], "charger");
@@ -790,12 +697,12 @@ mod tests {
         assert_eq!(bc.matches(SLOT).count(), 1);
         assert_eq!(bc.matches("androidboot.hardware").count(), 1);
         assert_eq!(cl, "\n");
-        assert!(sanitized(VENDOR_BOOTCONFIG, "", false).is_err());
-        assert!(sanitized(VENDOR_BOOTCONFIG, "androidboot.slot_suffix=", false).is_err());
+        assert!(sanitized(VENDOR_BOOTCONFIG, "", None).is_err());
+        assert!(sanitized(VENDOR_BOOTCONFIG, "androidboot.slot_suffix=", None).is_err());
         for value in ["_other", "_b", "\"_a", "_a\0"] {
-            assert!(sanitized(&config, &format!("{SLOT}={value}"), false).is_err(), "{value:?}");
+            assert!(sanitized(&config, &format!("{SLOT}={value}"), None).is_err(), "{value:?}");
         }
-        assert!(sanitized(&(config + "androidboot.slot_suffix=_b\n"), "", false).is_err());
+        assert!(sanitized(&(config + "androidboot.slot_suffix=_b\n"), "", None).is_err());
     }
 
     #[test]
@@ -809,7 +716,7 @@ mod tests {
         let (bc, cl) = sanitized(&config, concat!(
             "androidboot.bad_nl=\"has\nnewline\" androidboot.bad_cr=\"has\rcr\" androidboot.bad_nul=has\0nul ",
             "androidboot.vendor..bad=1 \"androidboot.vendor.ok=a b\" androidboot.unclosed=\"quote",
-        ), false).unwrap();
+        ), None).unwrap();
         let values = output_values(&bc);
         assert_eq!(values.len(), 7); // Offline header's four, slot, forced target, vendor.ok.
         assert_eq!(values["androidboot.vendor.ok"], "a b");
@@ -828,7 +735,7 @@ mod tests {
             (String::new(), "androidboot.boot_device=soc@0,foo/ufs androidboot.boot_device=a", vec!["soc@0,foo/ufs", "a"]),
         ];
         for (config, cmd, expected) in cases {
-            let (bc, cl) = sanitized(&config, &format!("{QEMU_05} {cmd} androidboot.bootdevice=custom -- androidboot.mode=charger ignore_me"), false).unwrap();
+            let (bc, cl) = sanitized(&config, &format!("{QEMU_05} {cmd} androidboot.bootdevice=custom -- androidboot.mode=charger ignore_me"), None).unwrap();
             let values = output_values(&bc);
             assert_eq!(values[BOOT_DEVICES], expected.join("\", \""));
             // Match GetBootDevices' bootconfig path: remove quotes, split on space, trim a trailing comma.
@@ -838,14 +745,14 @@ mod tests {
             assert_eq!(values[BOOTDEVICE], "custom");
             assert!(!values.contains_key(BOOT_DEVICE));
             assert!(!values.contains_key("androidboot.mode"));
-            assert_eq!(cl, sanitized("", QEMU_05, false).unwrap().1);
+            assert_eq!(cl, sanitized("", QEMU_05, None).unwrap().1);
         }
     }
 
     #[test]
     fn charger_and_regular_fstab_stay_guarded() {
         for slot in ["_a", "_b"] {
-            let (bc, _) = sanitized(&phone_bootconfig(slot), "androidboot.mode=charger", true).unwrap();
+            let (bc, _) = sanitized(&phone_bootconfig(slot), "androidboot.mode=charger", stock_controller()).unwrap();
             let values = output_values(&bc);
             assert_eq!(values["androidboot.mode"], "charger");
             assert_eq!(values[SLOT], slot);

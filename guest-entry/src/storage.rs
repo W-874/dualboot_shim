@@ -1,4 +1,4 @@
-use crate::policy::DeviceProfile;
+use crate::profile::{DeviceProfile, FormatProtocol};
 use crate::boot::record_progress;
 #[cfg(target_os = "android")]
 use crate::{policy::{Guest, IMAGES}, state, sys};
@@ -181,9 +181,9 @@ pub fn provision(guest: &Guest, disks: &sys::Disks, root: u64, private: &Path) -
     if !has_data {
         let tmp = staged(DATA)?;
         tmp.as_file().set_len(guest.volumes.userdata_bytes)?;
-        let mark = match guest.device {
-            DeviceProfile::Fuxi => NEW_V2,
-            DeviceProfile::Dada => NEW_V1,
+        let mark = match guest.device.description()?.format_protocol {
+            FormatProtocol::TokenV2 => NEW_V2,
+            FormatProtocol::LegacyV1 => NEW_V1,
         };
         set_auth(tmp.as_file(), AUTH, mark, libc::XATTR_CREATE, no_fault)?;
         publish(tmp, DATA)?;
@@ -528,15 +528,15 @@ impl<F: Fn(FormatStep) -> io::Result<()>> FormatAccess<F> {
             Err(e) if e.raw_os_error() == Some(libc::ENODATA) => return Ok(FormatGrant::Denied),
             Err(e) => return Err(e).context("read userdata format authorization"),
         };
-        let fresh = match (profile, &mark[..len]) {
+        let fresh = match (&profile.description()?.format_protocol, &mark[..len]) {
             (_, SPENT_V1) => return Ok(FormatGrant::Denied),
-            (DeviceProfile::Dada, NEW_V1) => {
+            (FormatProtocol::LegacyV1, NEW_V1) => {
                 ensure!(check_zero()? == ZeroState::AllZero, "fresh userdata contains nonzero bytes");
                 return Ok(FormatGrant::Legacy);
             }
-            (DeviceProfile::Fuxi, NEW_V1) => anyhow::bail!("refusing legacy fresh fuxi userdata format authorization"),
-            (DeviceProfile::Fuxi, NEW_V2) => true,
-            (DeviceProfile::Fuxi, DELEGATED_V2) => false,
+            (FormatProtocol::TokenV2, NEW_V1) => anyhow::bail!("refusing legacy fresh userdata format authorization for token-v2"),
+            (FormatProtocol::TokenV2, NEW_V2) => true,
+            (FormatProtocol::TokenV2, DELEGATED_V2) => false,
             _ => anyhow::bail!("unknown userdata format authorization"),
         };
 

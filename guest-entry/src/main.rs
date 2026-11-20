@@ -1,6 +1,8 @@
 #[cfg(any(target_os = "android", test))]
 mod policy;
 #[cfg(any(target_os = "android", test))]
+mod profile;
+#[cfg(any(target_os = "android", test))]
 mod state;
 
 #[cfg(any(target_os = "android", all(test, target_os = "linux")))]

@@ -1,0 +1,25 @@
+schema_version = 1
+id = "dada"
+format_protocol = "legacy-v1"
+
+[identity]
+touch_property = "soc/qcom,qupv3_1_geni_se@ac0000/spi@a88000/synaptics_tcm@0/synaptics,default-fw-image-name"
+
+[storage]
+platform_path = "soc/1d84000.ufshc"
+bootdevice = "1d84000.ufshc"
+required = true
+
+[product]
+zygote = "zygote64_32"
+
+[mounts]
+firmware = [
+  ["/dev/block/bootdevice/by-name/modem", "/vendor/firmware_mnt", "vfat", "ro,shortname=lower,uid=1000,gid=1000,dmask=227,fmask=337,context=u:object_r:firmware_file:s0", "wait,slotselect"],
+  ["/dev/block/bootdevice/by-name/modemfirmware", "/vendor/modem_firmware", "vfat", "ro,shortname=lower,uid=1000,gid=1000,dmask=227,fmask=337,context=u:object_r:firmware_file:s0", "wait,slotselect"],
+  ["/dev/block/bootdevice/by-name/dsp", "/vendor/dsp", "ext4", "ro,nosuid,nodev,noload", "wait,slotselect"],
+  ["/dev/block/bootdevice/by-name/bluetooth", "/vendor/bt_firmware", "vfat", "ro,shortname=lower,uid=1002,gid=3002,dmask=227,fmask=337,context=u:object_r:bt_firmware_file:s0", "wait,slotselect"],
+]
+charger = [
+  ["/dev/block/bootdevice/by-name/modem", "/vendor/firmware_mnt", "vfat", "ro,shortname=lower,uid=1000,gid=1000,dmask=227,fmask=337,context=u:object_r:firmware_file:s0", "wait,slotselect"],
+]

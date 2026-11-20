@@ -1,6 +1,6 @@
 use crate::sys;
 #[cfg(target_os = "android")]
-use crate::{policy::{self, DeviceProfile, Guest}, state, storage::{self, ANDROID, FormatGrant, STATE}};
+use crate::{policy::{self, Guest}, profile::DeviceProfile, state, storage::{self, ANDROID, FormatGrant, STATE}};
 #[cfg(target_os = "android")]
 use anyhow::{ensure, Result};
 use anyhow::Context;
@@ -232,19 +232,10 @@ impl Environment {
         let guest = Guest::read(&sys::text(sys::regular(Path::new("/skyward-guest.toml"), root_id, false)?, 16 * 1024)?)?;
         let config = input("/proc/bootconfig")?;
         let cmdline = input("/proc/cmdline")?;
-        let dt = policy::DeviceTree {
-            compatible: &dt_property("compatible")?,
-            model: &dt_property("model")?,
-            fuxi_touch_fw: &dt_property(policy::FUXI_TOUCH_FW)?,
-            dada_touch_fw: &dt_property(policy::DADA_TOUCH_FW)?,
-        };
-        ensure!(policy::device_matches(guest.device, &config, &cmdline, dt), "bootloader/DT device identity does not match {}", guest.device.codename());
-        // Both stock trees place UFS here. Keep the existing non-UFS path
-        // for Fuxi (including its twin), but do not guess a controller for Dada.
-        let controller = Path::new("/sys/devices/platform").join(policy::UFS_PATH);
-        let on_ufs = host_misc.sysfs.starts_with(&controller) && userdata.sysfs.starts_with(&controller);
-        ensure!(guest.device != DeviceProfile::Dada || on_ufs, "Dada host partitions are not on the expected UFS controller");
-        let (config, cmdline) = policy::sanitized(&config, &cmdline, on_ufs).context("sanitize boot parameters")?;
+        let board = guest.device.description()?;
+        ensure!(guest.device.matches_live(&config, &cmdline, dt_property)?, "bootloader/DT device identity does not match {}", guest.device.codename());
+        let boot_controller = board.storage.observe(&host_misc.sysfs, &userdata.sysfs)?;
+        let (config, cmdline) = policy::sanitized(&config, &cmdline, boot_controller).context("sanitize boot parameters")?;
         let private = PathBuf::from("/dev/.guest-entry");
         sys::dir(&private, 0o700, devfs)?;
         sys::vfs(None, Path::new("/"), libc::MS_PRIVATE | libc::MS_REC)?;
