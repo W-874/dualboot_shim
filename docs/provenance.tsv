@@ -1,0 +1,10 @@
+path	source	import	boundary
+guest-entry/ (exact)	SkyWard-uwu-dualboot/crates/skyward-guest-entry	daa649b99e	d8d5bda worktree; .heritage-snapshot guest-entry tarball
+Cargo workspace; crates/	SkyWard-uwu-dualboot/{Cargo.toml,Cargo.lock,rust-toolchain.toml,LICENSE,crates/skyward-block,crates/skyward-sys}	a123893755	d8d5bda worktree; GPL-3.0-or-later Rust
+guest-entry/src/; profiles/	guest-entry policy, boot, storage and original product fstab	5b69fc4473	embedded descriptions; no vendor firmware
+platform-patches/	lock/frozen-r26e; evidence/{P4.3,r26e}	6ee0783d57	series.tsv carries project base and local SHA-256
+product-template/; legacy/	uwuAOSP-src/device/xiaomi/{skyward-guest,skyward}; uwuAOSP-dada/skyward-guest; lock/initial-git; evidence/{P4.5,selinux-rollback}	28ca0c2001	original guest files, audit-only historical policy and source-only C
+tools/	workspace tools; device/xiaomi/skyward-guest/fstab/tools; P5.3/P5.4	24157a7025; dcbc95cb6d	fstab at 28ca0c2001; checker external recovery reader
+harness/	evidence/r26-qemu/harness; tools/{skyward-qemu-replay,fuxi-twin,fuxi-twin-scenarios,dada-twin}	38e501d0a9	r25 offline only; binary inputs external
+docs/	ShimArchiveDesign.md, DualbootBoundary.md and research extracts; original evidence reports	this documentation commit	see evidence-index.md; no restricted evidence blobs
+external recovery	SkyWard-uwu-dualboot/crates/{skyward-system-init,skyward-systems}	not imported	retain upstream and .heritage-snapshot, no replacement for installer/recovery history
