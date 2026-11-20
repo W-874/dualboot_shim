@@ -1,0 +1,13 @@
+[package]
+name = "fuxi-twin-host"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1.0.104"
+skyward-block = { path = "../../SkyWard/crates/skyward-block" }
+skyward-bootimg = { path = "../../SkyWard/crates/skyward-bootimg" }
+skyward-sys = { path = "../../SkyWard/crates/skyward-sys" }
+skyward-systems = { path = "../../SkyWard/crates/skyward-systems" }
+toml = "0.9.12"
