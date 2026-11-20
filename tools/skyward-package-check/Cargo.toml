@@ -1,0 +1,11 @@
+[package]
+name = "skyward-package-check"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+skyward-systems = { path = "recovery/crates/skyward-systems" }
+zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
